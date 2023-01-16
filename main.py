@@ -1,98 +1,287 @@
+import random
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.model_selection import KFold
-
+from torch.utils.data import Dataset, DataLoader
 
 K = 30
 
 
-class MethylCNN(nn.Module):
-    def __init__(self):
-        super(MethylCNN, self).__init__()
-        self.conv1 = nn.Conv2d(4, 32, kernel_size=6, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=6, stride=2, padding=0)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * (K - 4 + 1) * (K - 4 + 1), 2)
+# basic CNN model
+class DNA_CNN(nn.Module):
+    def __init__(self, seq_len, num_filters=32, kernel_size=6):
+        super().__init__()
+        self.seq_len = seq_len
 
-    def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = x.view(-1, 64 * (K - 4 + 1) * (K - 4 + 1))
-        x = F.relu(self.fc1(x))
-        return x
+        self.conv_net = nn.Sequential(
+            # 4 is for the 4 nucleotides
+            nn.Conv1d(4, num_filters, kernel_size=kernel_size),
+            nn.ReLU(inplace=True),
+            nn.Flatten(),
+            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1)
+        )
+
+    def forward(self, xb):
+        # permute to put channel in correct order
+        # (batch_size x 4channel x seq_len)
+        xb = xb.permute(0, 2, 1)
+
+        # print(xb.shape)
+        out = self.conv_net(xb)
+        return out
 
 
 ENC = {"A": 0, "C": 1, "G": 2, "T": 3}
 
 
 def hot_encode(seq: str):
-    res = np.zeros((4,len(seq)))
+    res = np.zeros((4, len(seq)))
     for i, c in enumerate(list(seq)):
         res[ENC[c]][i] = 1
 
     return res.T
 
 
+def loss_batch(model, loss_func, xb, yb, opt=None, verbose=False):
+    '''
+    Apply loss function to a batch of inputs. If no optimizer
+    is provided, skip the back prop step.
+    '''
+    if verbose:
+        print('loss batch ****')
+        print("xb shape:", xb.shape)
+        print("yb shape:", yb.shape)
+        print("yb shape:", yb.squeeze(1).shape)
+        # print("yb",yb)
+
+    # get the batch output from the model given your input batch
+    # ** This is the model's prediction for the y labels! **
+    xb_out = model(xb.float())
+
+    if verbose:
+        print("model out pre loss", xb_out.shape)
+        # print('xb_out', xb_out)
+        print("xb_out:", xb_out.shape)
+        print("yb:", yb.shape)
+        print("yb.long:", yb.long().shape)
+
+    loss = loss_func(xb_out, yb.float())  # for MSE/regression
+    # __FOOTNOTE 2__
+
+    if opt is not None:  # if opt
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+
+    return loss.item(), len(xb)
+
+
+def train_step(model, train_dl, loss_func, device, opt):
+    '''
+    Execute 1 set of batched training within an epoch
+    '''
+    # Set model to Training mode
+    model.train()
+    tl = []  # train losses
+    ns = []  # batch sizes, n
+
+    # loop through train DataLoader
+    for xb, yb in train_dl:
+        # put on GPU
+        xb, yb = xb.to(device), yb.to(device)
+
+        # provide opt so backprop happens
+        t, n = loss_batch(model, loss_func, xb, yb, opt=opt)
+
+        # collect train loss and batch sizes
+        tl.append(t)
+        ns.append(n)
+
+    # average the losses over all batches
+    train_loss = np.sum(np.multiply(tl, ns)) / np.sum(ns)
+
+    return train_loss
+
+
+def val_step(model, val_dl, loss_func, device):
+    '''
+    Execute 1 set of batched validation within an epoch
+    '''
+    # Set model to Evaluation mode
+    model.eval()
+    with torch.no_grad():
+        vl = []  # val losses
+        ns = []  # batch sizes, n
+
+        # loop through validation DataLoader
+        for xb, yb in val_dl:
+            # put on GPU
+            xb, yb = xb.to(device), yb.to(device)
+
+            # Do NOT provide opt here, so backprop does not happen
+            v, n = loss_batch(model, loss_func, xb, yb)
+
+            # collect val loss and batch sizes
+            vl.append(v)
+            ns.append(n)
+
+    # average the losses over all batches
+    val_loss = np.sum(np.multiply(vl, ns)) / np.sum(ns)
+
+    return val_loss
+
+
+def fit(epochs, model, loss_func, opt, train_dl, val_dl, device, patience=1000):
+    '''
+    Fit the model params to the training data, eval on unseen data.
+    Loop for a number of epochs and keep train of train and val losses
+    along the way
+    '''
+    # keep track of losses
+    train_losses = []
+    val_losses = []
+
+    # loop through epochs
+    for epoch in range(epochs):
+        # take a training step
+        train_loss = train_step(model, train_dl, loss_func, device, opt)
+        train_losses.append(train_loss)
+
+        # take a validation step
+        val_loss = val_step(model, val_dl, loss_func, device)
+        val_losses.append(val_loss)
+
+        print(f"E{epoch} | train loss: {train_loss:.3f} | val loss: {val_loss:.3f}")
+
+    return train_losses, val_losses
+
+
+def run_model(train_dl, val_dl, model, device='cpu', lr=0.01, epochs=50, lossf=None, opt=None):
+    '''
+    Given train and val DataLoaders and a NN model, fit the mode to the training
+    data. By default, use MSE loss and an SGD optimizer
+    '''
+    # define optimizer
+    if opt:
+        optimizer = opt
+    else:  # if no opt provided, just use SGD
+        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+
+    # define loss function
+    if lossf:
+        loss_func = lossf
+    else:  # if no loss function provided, just use MSE
+        loss_func = torch.nn.MSELoss()
+
+    # run the training loop
+    train_losses, val_losses = fit(epochs, model, loss_func, optimizer, train_dl, val_dl, device)
+
+    return train_losses, val_losses
+
+
+def quick_split(df, split_frac=0.8):
+    '''
+    Given a df of samples, randomly split indices between
+    train and test at the desired fraction
+    '''
+    cols = df.columns  # original columns, use to clean up reindexed cols
+    df = df.reset_index()
+
+    # shuffle indices
+    idxs = list(range(df.shape[0]))
+    random.shuffle(idxs)
+
+    # split shuffled index list by split_frac
+    split = int(len(idxs) * split_frac)
+    train_idxs = idxs[:split]
+    test_idxs = idxs[split:]
+
+    # split dfs and return
+    train_df = df[df.index.isin(train_idxs)]
+    test_df = df[df.index.isin(test_idxs)]
+
+    return train_df[cols], test_df[cols]
+
+
+class SeqDatasetOHE(Dataset):
+    '''
+    Dataset for one-hot-encoded sequences
+    '''
+
+    def __init__(self, df, seq_col='seq', target_col='score'):
+        self.seqs = list(df[seq_col].values)
+        self.seq_len = len(self.seqs[0])
+        self.ohe_seqs = torch.stack([torch.tensor(hot_encode(x)) for x in self.seqs])
+        self.labels = torch.tensor(list(df[target_col].values)).unsqueeze(1)
+
+    def __len__(self): return len(self.seqs)
+
+    def __getitem__(self, idx):
+        # Given an index, return a tuple of an X with it's associated Y
+        # This is called inside DataLoader
+        seq = self.ohe_seqs[idx]
+        label = self.labels[idx]
+
+        return seq, label
+
+
+def build_dataloaders(train_df, test_df, seq_col='data', target_col='label', batch_size=128, shuffle=True):
+    '''
+    Given a train and test df with some batch construction
+    details, put them into custom SeqDatasetOHE() objects.
+    Give the Datasets to the DataLoaders and return.
+    '''
+
+    # create Datasets
+    train_ds = SeqDatasetOHE(train_df, seq_col=seq_col, target_col=target_col)
+    test_ds = SeqDatasetOHE(test_df, seq_col=seq_col, target_col=target_col)
+
+    # Put DataSets into DataLoaders
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=shuffle)
+    test_dl = DataLoader(test_ds, batch_size=batch_size)
+
+    return train_dl, test_dl
+
+
+def quick_loss_plot(data_label_list,loss_type="MSE Loss",sparse_n=0):
+    '''
+    For each train/test loss trajectory, plot loss by epoch
+    '''
+    for i,(train_data,test_data,label) in enumerate(data_label_list):
+        plt.plot(train_data,linestyle='--',color=f"C{i}", label=f"{label} Train")
+        plt.plot(test_data,color=f"C{i}", label=f"{label} Val",linewidth=3.0)
+
+    plt.legend()
+    plt.ylabel(loss_type)
+    plt.xlabel("Epoch")
+    plt.legend(bbox_to_anchor=(1,1),loc='lower right')
+    plt.show()
+
 def main():
-    model = MethylCNN()
-    print(model)
-
-    criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-    # K-fold cross validation
-    k = 5  # number of folds
-    num_epochs = 10
-
-    # Split the data into k-folds
-    kf = KFold(n_splits=k, shuffle=True)
-
     plus_file = open('plus_seq2.txt', 'r')
     pluses = plus_file.readlines()
-    X_pluses = np.array([hot_encode(p.strip()) for p in pluses])
-    y_pluses = np.ones(len(pluses))
+    X_p_raw = [(p.strip(), 1) for p in pluses]
+    df_p = pd.DataFrame(X_p_raw, columns=["data", "label"])
 
     minus_file = open('plus_seq2.txt', 'r')
     minuses = minus_file.readlines()
-    X_minuses = np.array([hot_encode(m.strip()) for m in minuses])
-    y_minuses = np.zeros(len(minuses))
+    X_m_raw = [(m.strip(), 0) for m in minuses]
+    df_m = pd.DataFrame(X_m_raw, columns=["data", "label"])
 
-    X = np.r_[X_pluses, X_minuses]
-    y = np.r_[y_pluses, y_minuses]
+    df = pd.concat([df_p, df_m], axis=0).reset_index(drop=True)
+    full_train_df, test_df = quick_split(df)
+    train_df, val_df = quick_split(full_train_df)
 
-    for train_index, val_index in kf.split(X):
-        # Split the data into train and validation sets
-        X_train, X_val = X[train_index], X[val_index]
-        y_train, y_val = y[train_index], y[val_index]
+    train_dl, val_dl = build_dataloaders(train_df, val_df)
 
-        # Convert data to PyTorch tensors
-        X_train = torch.from_numpy(X_train).float()
-        X_val = torch.from_numpy(X_val).float()
-        y_train = torch.from_numpy(y_train).long()
-        y_val = torch.from_numpy(y_val).long()
-
-        # Train the model
-        for epoch in range(num_epochs):
-            # Forward pass
-            output = model(X_train)
-            loss = criterion(output, y_train)
-
-            # Backward and optimize
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        # Evaluate the model on the validation set
-        with torch.no_grad():
-            output = model(X_val)
-            val_loss = criterion(output, y_val)
-            val_acc = (output.argmax(1) == y_val).float().mean()
-
-        # Print the validation loss and accuracy
-        print(f'Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.4f}')
+    model = DNA_CNN(K, 32)
+    lin_train_losses, lin_val_losses = run_model(train_dl, val_dl, model, 'cpu')
+    lin_data_label = (lin_train_losses, lin_val_losses, "Lin")
+    quick_loss_plot([lin_data_label])
 
 
 if __name__ == "__main__":
