@@ -354,6 +354,10 @@ def main():
     models = [("CNN", model)]
     oracle = df.set_index('data').to_dict()['label']
     parity_pred(models, seqs, oracle)
+    # train data parity
+    seqs = df['data'].values
+    parity_pred(models, seqs, oracle)
+
 
 
 if __name__ == "__main__":
