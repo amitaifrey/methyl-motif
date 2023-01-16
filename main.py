@@ -9,7 +9,8 @@ import altair as alt
 from sklearn.metrics import r2_score
 
 K = 30
-
+BATCH_SIZE = 32
+LR = 0.01
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -166,7 +167,7 @@ def fit(epochs, model, loss_func, opt, train_dl, val_dl, device, patience=1000):
     return train_losses, val_losses
 
 
-def run_model(train_dl, val_dl, model, device='cpu', lr=0.01, epochs=50, lossf=None, opt=None):
+def run_model(train_dl, val_dl, model, device='cpu', lr=LR, epochs=50, lossf=None, opt=None):
     '''
     Given train and val DataLoaders and a NN model, fit the mode to the training
     data. By default, use MSE loss and an SGD optimizer
@@ -236,7 +237,7 @@ class SeqDatasetOHE(Dataset):
         return seq, label
 
 
-def build_dataloaders(train_df, test_df, seq_col='data', target_col='label', batch_size=128, shuffle=True):
+def build_dataloaders(train_df, test_df, seq_col='data', target_col='label', batch_size=BATCH_SIZE, shuffle=True):
     '''
     Given a train and test df with some batch construction
     details, put them into custom SeqDatasetOHE() objects.
