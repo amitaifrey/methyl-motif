@@ -336,8 +336,10 @@ def main():
     df_plus.columns = ["data", "label"]
     df_minus = pd.read_csv('minus_seq.txt', header=None)
     df_minus.columns = ["data", "label"]
+    # data is sorted by %, asc
+    df_plus, df_minus = df_plus[:POLES: -1], df_minus[:POLES]
 
-    df = pd.concat([df_plus[:POLES], df_minus[:POLES]], axis=0).reset_index(drop=True)
+    df = pd.concat([df_plus, df_minus], axis=0).reset_index(drop=True)
     full_train_df, test_df = quick_split(df)
     train_df, val_df = quick_split(full_train_df)
 
