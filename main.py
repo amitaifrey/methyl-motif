@@ -18,7 +18,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # basic CNN model
 class DNA_CNN(nn.Module):
-    def __init__(self, seq_len, num_filters=32, kernel_size=3, device=DEVICE):
+    def __init__(self, seq_len, num_filters=32, kernel_size=10, device=DEVICE):
         super().__init__()
         self.seq_len = seq_len
 
@@ -26,11 +26,11 @@ class DNA_CNN(nn.Module):
             # 4 is for the 4 nucleotides
             nn.Conv1d(4, num_filters, kernel_size=kernel_size, padding=1, device=device),
             nn.ReLU(inplace=True),
-            nn.MaxPool1d(kernel_size=kernel_size, stride=3),
-            nn.Conv1d(num_filters, 64, kernel_size=kernel_size, padding=1, device=device),
+            nn.MaxPool1d(kernel_size=2, stride=1),
+            nn.Conv1d(num_filters, 64, kernel_size=5, padding=1, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(64 * 10, 64, device=device),
+            nn.Linear(64*10, 64, device=device),
             nn.Linear(64, 16, device=device),
             nn.Linear(16, 1, device=device),
         )
@@ -332,9 +332,9 @@ def parity_pred(models, seqs, oracle, alt=False):
 
 
 def main():
-    df_plus = pd.read_csv('plus_seq.txt', header=None)
+    df_plus = pd.read_csv('plus_20_seq10k.txt', header=None)
     df_plus.columns = ["data", "label"]
-    df_minus = pd.read_csv('minus_seq.txt', header=None)
+    df_minus = pd.read_csv('minus_20_seq10k.txt', header=None)
     df_minus.columns = ["data", "label"]
     # data is sorted by %, asc
     df_plus, df_minus = df_plus.tail(POLES), df_minus.head(POLES)
