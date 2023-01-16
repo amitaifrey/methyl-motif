@@ -12,6 +12,7 @@ K = 30
 BATCH_SIZE = 32
 LR = 0.01
 EPOCHS = 50
+POLES = 1_000
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -29,7 +30,7 @@ class DNA_CNN(nn.Module):
             nn.Conv1d(num_filters, 64, kernel_size=kernel_size, padding=1, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(64*10, 64, device=device),
+            nn.Linear(64 * 10, 64, device=device),
             nn.Linear(64, 16, device=device),
             nn.Linear(16, 1, device=device),
         )
@@ -143,7 +144,8 @@ def val_step(model, val_dl, loss_func, device):
     return val_loss
 
 
-def fit(epochs, model, loss_func, opt, train_dl, val_dl, device, patience=1000):
+def fit(epochs, model, loss_func, opt, train_dl, val_dl, device,
+        patience=1000):
     '''
     Fit the model params to the training data, eval on unseen data.
     Loop for a number of epochs and keep train of train and val losses
@@ -178,7 +180,7 @@ def run_model(train_dl, val_dl, model, device='cpu', lr=LR, epochs=EPOCHS, lossf
         optimizer = opt
     else:  # if no opt provided, just use SGD
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # define loss function
     if lossf:
@@ -238,7 +240,8 @@ class SeqDatasetOHE(Dataset):
         return seq, label
 
 
-def build_dataloaders(train_df, test_df, seq_col='data', target_col='label', batch_size=BATCH_SIZE, shuffle=True):
+def build_dataloaders(train_df, test_df, seq_col='data', target_col='label',
+                      batch_size=BATCH_SIZE, shuffle=True):
     '''
     Given a train and test df with some batch construction
     details, put them into custom SeqDatasetOHE() objects.
@@ -270,6 +273,7 @@ def quick_loss_plot(data_label_list, loss_type="MSE Loss", sparse_n=0):
     plt.legend(bbox_to_anchor=(1, 1), loc='lower right')
     plt.show()
 
+
 def parity_plot(model_name, df, r2):
     '''
     Given a dataframe of samples with their true and predicted values,
@@ -279,12 +283,12 @@ def parity_plot(model_name, df, r2):
 
     # y=x line
     xpoints = ypoints = plt.xlim()
-    plt.plot(xpoints, ypoints, linestyle='--', color='k', lw=2, scalex=False, scaley=False)
+    plt.plot(xpoints, ypoints, linestyle='--', color='k', lw=2, scalex=False,scaley=False)
 
     plt.ylim(xpoints)
     plt.ylabel("Predicted Score", fontsize=14)
     plt.xlabel("Actual Score", fontsize=14)
-    plt.title(f"{model_name} (r2:{r2:.3f})", fontsize=20)
+    plt.title(f"{model_name} Poles: {POLES}", fontsize=20)
     plt.show()
 
 
@@ -326,13 +330,14 @@ def parity_pred(models, seqs, oracle, alt=False):
         else:
             parity_plot(model_name, df, r2)
 
+
 def main():
     df_plus = pd.read_csv('plus_seq.txt', header=None)
     df_plus.columns = ["data", "label"]
     df_minus = pd.read_csv('minus_seq.txt', header=None)
     df_minus.columns = ["data", "label"]
 
-    df = pd.concat([df_plus, df_minus], axis=0).reset_index(drop=True)
+    df = pd.concat([df_plus[:POLES], df_minus[:POLES]], axis=0).reset_index(drop=True)
     full_train_df, test_df = quick_split(df)
     train_df, val_df = quick_split(full_train_df)
 
