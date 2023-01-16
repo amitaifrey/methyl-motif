@@ -1,0 +1,1 @@
+cmd = plus_30_10k.fasta human analysis_output10k/ -fasta minus_30_10k.fasta
