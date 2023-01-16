@@ -11,6 +11,8 @@ from torch.utils.data import Dataset, DataLoader
 K = 30
 
 
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 # basic CNN model
 class DNA_CNN(nn.Module):
     def __init__(self, seq_len, num_filters=32, kernel_size=6):
@@ -279,7 +281,7 @@ def main():
     train_dl, val_dl = build_dataloaders(train_df, val_df)
 
     model = DNA_CNN(K, 32)
-    lin_train_losses, lin_val_losses = run_model(train_dl, val_dl, model, 'cpu')
+    lin_train_losses, lin_val_losses = run_model(train_dl, val_dl, model, DEVICE)
     lin_data_label = (lin_train_losses, lin_val_losses, "Lin")
     quick_loss_plot([lin_data_label])
 
