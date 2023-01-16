@@ -4,9 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from sklearn.model_selection import KFold
 from torch.utils.data import Dataset, DataLoader
+import altair as alt
+from sklearn.metrics import r2_score
 
 K = 30
 
@@ -21,10 +21,15 @@ class DNA_CNN(nn.Module):
 
         self.conv_net = nn.Sequential(
             # 4 is for the 4 nucleotides
-            nn.Conv1d(4, num_filters, kernel_size=kernel_size, device=device),
+            nn.Conv1d(4, num_filters, kernel_size=kernel_size, padding=1, device=device),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(kernel_size=kernel_size, stride=3),
+            nn.Conv1d(num_filters, 64, kernel_size=kernel_size, padding=1, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1, device=device),
+            nn.Linear(64*10, 64, device=device),
+            nn.Linear(64, 16, device=device),
+            nn.Linear(16, 1, device=device),
         )
 
     def forward(self, xb):
@@ -171,7 +176,7 @@ def run_model(train_dl, val_dl, model, device='cpu', lr=0.01, epochs=50, lossf=N
         optimizer = opt
     else:  # if no opt provided, just use SGD
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # define loss function
     if lossf:
@@ -263,19 +268,69 @@ def quick_loss_plot(data_label_list, loss_type="MSE Loss", sparse_n=0):
     plt.legend(bbox_to_anchor=(1, 1), loc='lower right')
     plt.show()
 
+def parity_plot(model_name, df, r2):
+    '''
+    Given a dataframe of samples with their true and predicted values,
+    make a scatterplot.
+    '''
+    plt.scatter(df['truth'].values, df['pred'].values, alpha=0.2)
+
+    # y=x line
+    xpoints = ypoints = plt.xlim()
+    plt.plot(xpoints, ypoints, linestyle='--', color='k', lw=2, scalex=False, scaley=False)
+
+    plt.ylim(xpoints)
+    plt.ylabel("Predicted Score", fontsize=14)
+    plt.xlabel("Actual Score", fontsize=14)
+    plt.title(f"{model_name} (r2:{r2:.3f})", fontsize=20)
+    plt.show()
+
+
+def alt_parity_plot(model, df, r2):
+    '''
+    Make an interactive parity plot with altair
+    '''
+    chart = alt.Chart(df).mark_circle(size=100, opacity=0.4).encode(
+        alt.X('truth:Q'),
+        alt.Y('pred:Q'),
+        tooltip=['seq:N']
+    ).properties(
+        title=f'{model} (r2:{r2:.3f})'
+    ).interactive()
+
+    chart.save(f'alt_out/parity_plot_{model}.html')
+    display(chart)
+
+
+def parity_pred(models, seqs, oracle, alt=False):
+    '''Given some sequences, get the model's predictions '''
+    dfs = {}  # key: model name, value: parity_df
+
+    for model_name, model in models:
+        print(f"Running {model_name}")
+        data = []
+        for dna in seqs:
+            s = torch.tensor(hot_encode(dna)).unsqueeze(0).to(DEVICE)
+            actual = oracle[dna]
+            pred = model(s.float())
+            data.append([dna, actual, pred.item()])
+        df = pd.DataFrame(data, columns=['seq', 'truth', 'pred'])
+        r2 = r2_score(df['truth'], df['pred'])
+        dfs[model_name] = (r2, df)
+
+        # plot parity plot
+        if alt:  # make an altair plot
+            alt_parity_plot(model_name, df, r2)
+        else:
+            parity_plot(model_name, df, r2)
 
 def main():
-    plus_file = open('plus_seq.txt', 'r')
-    pluses = plus_file.readlines()
-    X_p_raw = [(p.strip(), 1) for p in pluses]
-    df_p = pd.DataFrame(X_p_raw, columns=["data", "label"])
+    df_plus = pd.read_csv('plus_seq.txt', header=None)
+    df_plus.columns = ["data", "label"]
+    df_minus = pd.read_csv('minus_seq.txt', header=None)
+    df_minus.columns = ["data", "label"]
 
-    minus_file = open('plus_seq.txt', 'r')
-    minuses = minus_file.readlines()
-    X_m_raw = [(m.strip(), 0) for m in minuses]
-    df_m = pd.DataFrame(X_m_raw, columns=["data", "label"])
-
-    df = pd.concat([df_p, df_m], axis=0).reset_index(drop=True)
+    df = pd.concat([df_plus, df_minus], axis=0).reset_index(drop=True)
     full_train_df, test_df = quick_split(df)
     train_df, val_df = quick_split(full_train_df)
 
@@ -285,6 +340,11 @@ def main():
     train_losses, val_losses = run_model(train_dl, val_dl, model, DEVICE)
     data_label = (train_losses, val_losses, "Loss")
     quick_loss_plot([data_label])
+
+    seqs = test_df['data'].values
+    models = [("CNN", model)]
+    oracle = df.set_index('data').to_dict()['label']
+    parity_pred(models, seqs, oracle)
 
 
 if __name__ == "__main__":
