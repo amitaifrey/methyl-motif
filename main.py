@@ -15,16 +15,16 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # basic CNN model
 class DNA_CNN(nn.Module):
-    def __init__(self, seq_len, num_filters=32, kernel_size=6):
+    def __init__(self, seq_len, num_filters=32, kernel_size=6, device=DEVICE):
         super().__init__()
         self.seq_len = seq_len
 
         self.conv_net = nn.Sequential(
             # 4 is for the 4 nucleotides
-            nn.Conv1d(4, num_filters, kernel_size=kernel_size),
+            nn.Conv1d(4, num_filters, kernel_size=kernel_size, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1)
+            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1, device=device)
         )
 
     def forward(self, xb):
