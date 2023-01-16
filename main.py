@@ -264,12 +264,12 @@ def quick_loss_plot(data_label_list,loss_type="MSE Loss",sparse_n=0):
     plt.show()
 
 def main():
-    plus_file = open('plus_seq2.txt', 'r')
+    plus_file = open('plus_seq.txt', 'r')
     pluses = plus_file.readlines()
     X_p_raw = [(p.strip(), 1) for p in pluses]
     df_p = pd.DataFrame(X_p_raw, columns=["data", "label"])
 
-    minus_file = open('plus_seq2.txt', 'r')
+    minus_file = open('plus_seq.txt', 'r')
     minuses = minus_file.readlines()
     X_m_raw = [(m.strip(), 0) for m in minuses]
     df_m = pd.DataFrame(X_m_raw, columns=["data", "label"])
