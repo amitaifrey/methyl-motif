@@ -10,12 +10,12 @@ from torch.utils.data import Dataset, DataLoader
 
 K = 30
 
-
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 
 # basic CNN model
 class DNA_CNN(nn.Module):
-    def __init__(self, seq_len, num_filters=32, kernel_size=6, device=DEVICE):
+    def __init__(self, seq_len, num_filters=32, kernel_size=3, device=DEVICE):
         super().__init__()
         self.seq_len = seq_len
 
@@ -24,7 +24,7 @@ class DNA_CNN(nn.Module):
             nn.Conv1d(4, num_filters, kernel_size=kernel_size, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1, device=device)
+            nn.Linear(num_filters * (seq_len - kernel_size + 1), 1, device=device),
         )
 
     def forward(self, xb):
@@ -72,7 +72,6 @@ def loss_batch(model, loss_func, xb, yb, opt=None, verbose=False):
         print("yb.long:", yb.long().shape)
 
     loss = loss_func(xb_out, yb.float())  # for MSE/regression
-    # __FOOTNOTE 2__
 
     if opt is not None:  # if opt
         loss.backward()
@@ -172,6 +171,7 @@ def run_model(train_dl, val_dl, model, device='cpu', lr=0.01, epochs=50, lossf=N
         optimizer = opt
     else:  # if no opt provided, just use SGD
         optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # define loss function
     if lossf:
@@ -249,19 +249,20 @@ def build_dataloaders(train_df, test_df, seq_col='data', target_col='label', bat
     return train_dl, test_dl
 
 
-def quick_loss_plot(data_label_list,loss_type="MSE Loss",sparse_n=0):
+def quick_loss_plot(data_label_list, loss_type="MSE Loss", sparse_n=0):
     '''
     For each train/test loss trajectory, plot loss by epoch
     '''
-    for i,(train_data,test_data,label) in enumerate(data_label_list):
-        plt.plot(train_data,linestyle='--',color=f"C{i}", label=f"{label} Train")
-        plt.plot(test_data,color=f"C{i}", label=f"{label} Val",linewidth=3.0)
+    for i, (train_data, test_data, label) in enumerate(data_label_list):
+        plt.plot(train_data, linestyle='--', color=f"C{i}", label=f"{label} Train")
+        plt.plot(test_data, color=f"C{i}", label=f"{label} Val", linewidth=3.0)
 
     plt.legend()
     plt.ylabel(loss_type)
     plt.xlabel("Epoch")
-    plt.legend(bbox_to_anchor=(1,1),loc='lower right')
+    plt.legend(bbox_to_anchor=(1, 1), loc='lower right')
     plt.show()
+
 
 def main():
     plus_file = open('plus_seq.txt', 'r')
@@ -281,9 +282,9 @@ def main():
     train_dl, val_dl = build_dataloaders(train_df, val_df)
 
     model = DNA_CNN(K, 32)
-    lin_train_losses, lin_val_losses = run_model(train_dl, val_dl, model, DEVICE)
-    lin_data_label = (lin_train_losses, lin_val_losses, "Lin")
-    quick_loss_plot([lin_data_label])
+    train_losses, val_losses = run_model(train_dl, val_dl, model, DEVICE)
+    data_label = (train_losses, val_losses, "Loss")
+    quick_loss_plot([data_label])
 
 
 if __name__ == "__main__":
