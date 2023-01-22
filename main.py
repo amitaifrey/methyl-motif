@@ -7,12 +7,13 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import altair as alt
 from sklearn.metrics import r2_score
+import logomaker
 
 K = 30
 BATCH_SIZE = 32
-LR = 0.01
-EPOCHS = 50
-POLES = 1_000
+LR = 0.05
+EPOCHS = 200
+POLES = 10_000
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -26,13 +27,14 @@ class DNA_CNN(nn.Module):
             # 4 is for the 4 nucleotides
             nn.Conv1d(4, num_filters, kernel_size=kernel_size, padding=1, device=device),
             nn.ReLU(inplace=True),
-            nn.MaxPool1d(kernel_size=2, stride=1),
-            nn.Conv1d(num_filters, 64, kernel_size=5, padding=1, device=device),
+            nn.MaxPool1d(kernel_size=3, stride=1),
+            nn.Conv1d(num_filters, 64, kernel_size=10, padding=1, device=device),
             nn.ReLU(inplace=True),
             nn.Flatten(),
-            nn.Linear(64*20, 64, device=device),
+            nn.Linear(64*14, 64, device=device),
             nn.Linear(64, 16, device=device),
             nn.Linear(16, 1, device=device),
+            nn.Sigmoid()
         )
 
     def forward(self, xb):
@@ -330,6 +332,20 @@ def parity_pred(models, seqs, oracle, alt=False):
         else:
             parity_plot(model_name, df, r2)
 
+def draw_logo(weight, i):
+    logo_df = pd.DataFrame(weight.T, columns=['A','C','G','T'])
+    logo = logomaker.Logo(logo_df)
+
+    # style using Logo methods
+    logo.style_spines(visible=False)
+    logo.style_spines(spines=['left', 'bottom'], visible=True)
+    logo.style_xticks(rotation=90, fmt='%d', anchor=0)
+
+    # style using Axes methods
+    logo.ax.set_ylabel("Weight in layer", labelpad=-1)
+    logo.ax.xaxis.set_ticks_position('none')
+    logo.ax.xaxis.set_tick_params(pad=-1)
+    logo.fig.savefig(f'logos\logo{i}.png')
 
 def main():
     df_plus = pd.read_csv('plus_seq.txt', header=None)
@@ -355,9 +371,11 @@ def main():
     oracle = df.set_index('data').to_dict()['label']
     parity_pred(models, seqs, oracle)
     # train data parity
-    seqs = df['data'].values
+    seqs = train_df['data'].values
     parity_pred(models, seqs, oracle)
 
+    for i in range(len(model.conv_net[0].weight.detach().numpy())):
+        draw_logo(model.conv_net[0].weight.detach().numpy()[i], i)
 
 
 if __name__ == "__main__":
